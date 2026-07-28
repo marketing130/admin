@@ -1,0 +1,17 @@
+{
+  "name": "retailors-marketplace",
+  "owner": {
+    "name": "Retailors Group",
+    "email": "marketing@retailorsgroup.com"
+  },
+  "metadata": {
+    "description": "Retailors Group's shared Claude Code skills for marketing and static-site work."
+  },
+  "plugins": [
+    {
+      "name": "retailors-skills",
+      "source": "./plugins/retailors-skills",
+      "description": "Marketing copywriting plus static-site blog and CMS patterns: copywriting, flat-file-blog-cms, remote-cms-api."
+    }
+  ]
+}

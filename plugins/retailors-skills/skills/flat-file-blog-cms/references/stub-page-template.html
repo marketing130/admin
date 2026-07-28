@@ -1,0 +1,11 @@
+<!-- Per-post stub file: save as /<slug>.html (matching the slug in
+     posts.json and posts/<slug>.md exactly). Its only job is to make the
+     literal /<slug>.html URL resolve to real content, since the listing
+     page links to the extensionless /<slug> form instead — see "Why the
+     stub files exist" in SKILL.md.
+
+     >>> CUSTOMIZE: the favicon path, and the preload href if the site's
+     main stylesheet isn't at /styles.css. -->
+<!DOCTYPE html><html><head><meta charset="UTF-8"><link rel="icon" type="image/png" href="/Media/Site-Logo.png"><link rel="preload" href="/styles.css" as="style"><style>html,body{margin:0;padding:0;background:#fff;min-height:100vh}</style><script>
+fetch('/blog-post.html').then(r=>r.text()).then(h=>{document.open();document.write(h);document.close()});
+</script></head><body></body></html>
