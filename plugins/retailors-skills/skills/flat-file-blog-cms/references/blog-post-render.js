@@ -5,12 +5,28 @@
    Requires these elements to exist in the page (adjust IDs to match the
    actual markup, or adjust this script to match existing IDs):
    #article-body, #post-hero-title, #breadcrumb-title, #post-hero-bg,
-   #post-hero-date, #post-hero-divider, and a <meta name="description">
-   tag already present in <head> (this script sets its content attribute,
-   it doesn't create the tag).
+   #post-hero-date, #post-hero-divider, and these already present in <head>
+   (this script only sets attributes on them, it doesn't create any of
+   them): <meta name="description">, <link rel="canonical">,
+   <meta property="og:title">, <meta property="og:description">,
+   <meta property="og:url">, <meta property="og:image">,
+   <meta name="twitter:title">, <meta name="twitter:description">,
+   <meta name="twitter:image">.
 
-   >>> CUSTOMIZE: the " — Site Name" suffix in document.title, and the
-   fallback "back to blog" link URL. */
+   >>> CUSTOMIZE: SITE_ORIGIN, the " — Site Name" suffix in document.title,
+   and the fallback "back to blog" link URL. */
+
+const SITE_ORIGIN = 'https://example.com'; // >>> CUSTOMIZE — no trailing slash
+
+// cover_image may be an absolute URL (still-remote image) or a site-relative
+// path like "Media/foo.jpg" (the recommended, localized form — see
+// "Featured images" in SKILL.md). og:image/twitter:image require an
+// absolute URL for social-share crawlers to resolve it, so always resolve
+// through this before writing it into a meta tag.
+function toAbsoluteUrl(value) {
+  if (!value) return value;
+  return /^https?:\/\//i.test(value) ? value : `${SITE_ORIGIN}/${value.replace(/^\/+/, '')}`;
+}
 
 /* ── PARSE FRONTMATTER ──
    Not a real YAML parser — splits each frontmatter line on the FIRST
@@ -60,12 +76,27 @@ async function loadPost() {
     const raw = await res.text();
     const { meta, body } = parseFrontmatter(raw);
 
-    /* Update page meta — CLIENT-SIDE ONLY. Does not update og:*, twitter:*,
-       canonical, or JSON-LD — those stay generic for every post. See the
-       "Important limitation" note in SKILL.md before assuming this is
-       enough for social sharing / rich search results. */
+    /* Update page meta — CLIENT-SIDE ONLY, so still invisible to anything
+       that doesn't execute JS (most social-media link unfurlers and some
+       crawlers see only whatever's baked into the static HTML). But for
+       anything that DOES run JS, every one of these becomes post-specific
+       rather than staying at generic/blog-listing-level values — see
+       "Important limitation" in SKILL.md for the full caveat and a
+       server-side option if that JS-invisibility matters for this client. */
+    const postUrl = `${SITE_ORIGIN}/${encodeURIComponent(slug)}`;
     document.title = `${meta.title} — Site Name`; // >>> CUSTOMIZE
     document.querySelector('meta[name="description"]').setAttribute('content', meta.excerpt || '');
+    document.querySelector('link[rel="canonical"]').setAttribute('href', postUrl);
+    document.querySelector('meta[property="og:title"]').setAttribute('content', meta.title || '');
+    document.querySelector('meta[property="og:description"]').setAttribute('content', meta.excerpt || '');
+    document.querySelector('meta[property="og:url"]').setAttribute('content', postUrl);
+    document.querySelector('meta[name="twitter:title"]').setAttribute('content', meta.title || '');
+    document.querySelector('meta[name="twitter:description"]').setAttribute('content', meta.excerpt || '');
+    if (meta.cover_image) {
+      const absoluteCoverImage = toAbsoluteUrl(meta.cover_image);
+      document.querySelector('meta[property="og:image"]').setAttribute('content', absoluteCoverImage);
+      document.querySelector('meta[name="twitter:image"]').setAttribute('content', absoluteCoverImage);
+    }
 
     /* Update hero */
     document.getElementById('post-hero-title').textContent = meta.title || '';
@@ -76,7 +107,10 @@ async function loadPost() {
     }
 
     if (meta.date) {
-      const date = new Date(meta.date).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
+      // timeZone: 'UTC' matters here — meta.date is a bare "YYYY-MM-DD"
+      // (no time component), so without pinning the zone, users west of UTC
+      // see the date rendered as one day earlier than what's in the file.
+      const date = new Date(meta.date).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
       document.getElementById('post-hero-date').textContent = date;
       document.getElementById('post-hero-divider').style.display = 'block';
     }

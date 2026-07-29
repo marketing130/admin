@@ -1,0 +1,45 @@
+# Auto-localizes any remotely-hosted post cover_image after it lands in the
+# repo. Needed specifically for the case where posts arrive via an external
+# publishing tool (a dashboard, an edge function, a webhook — see "How new
+# posts actually get added" in SKILL.md) that pushes posts.json/posts/*.md
+# straight to git and only ever gives you a remote storage URL for the
+# image — this repo has no control over that tool, so localization has to
+# happen as a follow-up commit rather than at publish time.
+#
+# Drop this in as .github/workflows/localize-blog-images.yml (adjust the
+# checked paths if this project's post files live somewhere else).
+name: Localize blog cover images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'posts.json'
+      - 'posts/**.md'
+
+jobs:
+  localize:
+    runs-on: ubuntu-latest
+    # Skip the run this workflow's own commit triggers — avoids an infinite loop.
+    if: "!contains(github.event.head_commit.message, '[skip localize]')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # >>> CUSTOMIZE: path to localize-cover-images.js if it's been copied
+      # somewhere other than the repo root / a scripts/ folder.
+      - name: Download remote cover images and rewrite references
+        run: node scripts/localize-cover-images.js
+
+      - name: Commit any localized images
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Media/ posts.json posts/*.md
+          git diff --cached --quiet || git commit -m "Localize blog cover images [skip localize]"
+          git push

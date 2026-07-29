@@ -41,9 +41,17 @@ whoever adds a post should insert at the top). Each entry:
   "slug": "post-title-here",
   "date": "2026-06-24",
   "excerpt": "One or two sentence summary shown on the listing page.",
-  "cover_image": "https://... or a local Media/ path"
+  "cover_image": "Media/blog-post-title-here.jpg"
 }
 ```
+
+`cover_image` can technically be any URL (absolute `https://...` or a
+site-relative `Media/...` path) — the rendering code just checks it for
+truthiness and drops it into an `<img src>` / CSS `background-image`
+either way. But **prefer downloading it into `Media/` and using the local
+path**, even when the source is a remote URL (e.g. from an external
+publishing tool — see "Featured images" below). Don't leave it pointing at
+external storage unless asked to.
 
 `slug` must exactly match the corresponding `posts/<slug>.md` filename (no
 `.md` extension in the JSON value) and the stub file's name (`<slug>.html`).
@@ -70,7 +78,7 @@ title: "Post Title Here"
 slug: "post-title-here"
 date: "2026-06-24"
 excerpt: "Same excerpt as in posts.json — kept in sync manually."
-cover_image: "https://... or a local Media/ path"
+cover_image: "Media/blog-post-title-here.jpg"
 ---
 The rest of the file is the post body, in plain markdown. Rendered
 client-side with the `marked` library — no server-side markdown
@@ -104,18 +112,59 @@ parses the frontmatter, updates `document.title` and the meta-description
 tag, and renders the markdown body via `marked.parse()`. See
 `references/blog-post-render.js` for the full script.
 
-**Important limitation to flag to the client, not silently ship**: because
-`document.title`/meta description are only updated by JavaScript *after*
-the page loads, they're invisible to anything that doesn't execute JS —
-most social-media link unfurlers and some crawlers. `og:title`,
-`og:description`, `og:image`, canonical URL, and any JSON-LD structured
-data stay generic/blog-listing-level values for every single post, never
-becoming post-specific. If per-post social sharing or rich search results
-matter to the client, this needs a server-side fix (e.g. a Cloudflare
-Worker that reads the matching `.md` frontmatter and rewrites those tags
-per request, similar in spirit to the `remote-cms-api` skill's render
-pipeline) — don't assume the client-side title update is sufficient SEO
-without asking.
+**Important limitation to flag to the client, not silently ship**: `document.title`,
+meta description, canonical URL, and `og:*`/`twitter:*` tags (title,
+description, url, image) should all be updated per-post via JS on load —
+see `references/blog-post-render.js`. But because that update only happens
+*after* the page loads, it's invisible to anything that doesn't execute
+JS — most social-media link unfurlers and some crawlers see only whatever's
+baked into the static HTML's `<head>`, which stays generic/blog-listing-level
+for every post. Any JSON-LD structured data has the same problem if it's
+only ever set via this same client-side pattern. If per-post social sharing
+or rich search results matter to the client, this needs a server-side fix
+(e.g. a Cloudflare Worker that reads the matching `.md` frontmatter and
+rewrites those tags per request, similar in spirit to the `remote-cms-api`
+skill's render pipeline) — don't assume the client-side update is
+sufficient SEO without asking.
+
+When setting `og:image`/`twitter:image` from `cover_image`, always resolve
+it to an absolute URL first (see `toAbsoluteUrl()` in
+`references/blog-post-render.js`) — a site-relative `Media/...` path works
+fine for an `<img src>` or CSS `background-image`, but social crawlers
+require an absolute URL for the image tag itself.
+
+## Featured images — download to the repo, don't leave them remote
+
+`cover_image` often arrives as a remote URL — an external publishing tool
+(a dashboard, an image host, a CMS edge function) usually only gives you a
+link to its own storage, not a file. **Download that image into `Media/`
+and rewrite `cover_image` to the local path, in both `posts.json` and the
+post's own frontmatter**, rather than leaving the site dependent on that
+external storage staying reachable indefinitely.
+
+This isn't hypothetical: on the reference site, a signed Supabase Storage
+URL for one post's `cover_image` started 404ing (the object had been
+deleted upstream) well after publish, silently breaking that post's hero
+image and social-share image with no local fallback to fall back to.
+Local files in the repo don't expire or get deleted out from under the
+site the way a third party's storage bucket can.
+
+Naming convention used on the reference site: `Media/blog-<slug>.jpg`
+(prefixed so blog images don't collide with the site's other stock photos
+in the same folder).
+
+**How this fits the "external automation" publishing model** (see below):
+since posts often arrive via a dashboard/webhook this pattern doesn't
+control, localization has to happen as a *follow-up* step, not at publish
+time:
+- **One-time backfill** for an existing site: run
+  `references/localize-cover-images.js` once against the whole `posts.json`.
+- **Going forward**: either have the external publishing tool download the
+  image itself and commit the local path directly (best, if you control
+  that tool), or add `references/localize-images-workflow.yml` as a GitHub
+  Actions workflow that runs the same script on every push touching
+  `posts.json`/`posts/**.md` and commits the localized result back — this
+  is the practical option when the publisher is outside your control.
 
 ## Why the stub files exist
 
@@ -174,3 +223,11 @@ render side and the on-disk file convention, not a publishing UI.
   stub file template.
 - `references/post-template.md` — a blank post template matching the
   frontmatter format, to copy per new post.
+- `references/localize-cover-images.js` — Node script (18+, no deps) that
+  downloads every remote `cover_image` into `Media/` and rewrites
+  `posts.json` + the matching post's frontmatter to the local path. Run
+  once as a backfill, or on a schedule/CI trigger for ongoing publishing.
+- `references/localize-images-workflow.yml` — GitHub Actions workflow
+  template that runs the script above automatically whenever
+  `posts.json`/`posts/**.md` change, for sites where posts are published
+  by external tooling this pattern doesn't control.
