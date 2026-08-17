@@ -16,6 +16,8 @@ Shared [Claude Code](https://claude.com/claude-code) skills used by the Retailor
 |---------|--------------|
 | **`/cms-onboard`** | End-to-end runbook for standing the blog and/or CMS up on a new client site: survey → blog → Worker + retrofit → optional pipelines → curl verification. |
 
+Prefer to paste a brief instead? [prompts/new-site-cms-kickoff.md](plugins/retailors-skills/prompts/new-site-cms-kickoff.md) has fill-in-the-blanks kickoff prompts for the same job — full stack, blog-only, and adding the optional pipelines later.
+
 ## Install (recommended — plugin marketplace)
 
 From inside Claude Code:
@@ -64,6 +66,8 @@ plugins/retailors-skills/
   INSTALL.md                         per-project install + upkeep guide
   commands/
     cms-onboard.md                   /cms-onboard runbook
+  prompts/
+    new-site-cms-kickoff.md          paste-ready kickoff prompts for a new site
   skills/
     copywriting/
     flat-file-blog-cms/
