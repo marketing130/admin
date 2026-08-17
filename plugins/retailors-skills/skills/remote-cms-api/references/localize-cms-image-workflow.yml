@@ -1,0 +1,99 @@
+# Downloads a newly-set remote image URL for a CMS content-image field
+# (block.<slug>.img-<n>-src) into Media/ and writes the local path back as the
+# saved override, so the live site never depends on external image hosting
+# staying reachable. Triggered by a database webhook (on cms_blocks
+# insert/update) hitting the Worker's /api/cms/webhooks/image-src route, which
+# re-dispatches here via repository_dispatch — see the "Content image
+# auto-localization" section of SKILL.md for the full pipeline and one-time
+# setup.
+#
+# Drop this in as .github/workflows/localize-cms-image.yml, alongside
+# scripts/localize-cms-image.js.
+#
+# >>> CUSTOMIZE: the client's domain in the final curl step.
+name: Localize CMS content image
+
+on:
+  repository_dispatch:
+    types: [localize-cms-image]
+
+permissions:
+  contents: write
+
+# Same reasoning as the blog localize workflow: main can move while this job
+# is running, so serialize runs and retry the push with a rebase rather than
+# risk two localize commits racing each other. NOT cancel-in-progress — each
+# run localizes a different image, so a newer run doesn't make an older one
+# redundant.
+concurrency:
+  group: localize-cms-image
+  cancel-in-progress: false
+
+jobs:
+  localize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download remote image
+        id: download
+        env:
+          IMAGE_URL: ${{ github.event.client_payload.image_url }}
+          PAGE_SLUG: ${{ github.event.client_payload.page_slug }}
+          BLOCK_KEY: ${{ github.event.client_payload.block_key }}
+        run: node scripts/localize-cms-image.js
+
+      - name: Commit and push localized image
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Media/
+          if git diff --cached --quiet; then
+            echo "Nothing to commit — image already present."
+            exit 0
+          fi
+          git commit -m "Localize CMS image: ${{ github.event.client_payload.block_key }} [skip localize]"
+
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt/5), rebasing onto latest origin/main..."
+            git fetch origin main
+            if ! git rebase origin/main; then
+              echo "Rebase hit a conflict — bailing out for manual review." >&2
+              git rebase --abort
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+
+          echo "Failed to push localized image after 5 attempts." >&2
+          exit 1
+
+      - name: Save local path back to the CMS
+        # Uses PUT .../content with a "block.<block_key>" field_key (the
+        # documented recommended-flow convention, guaranteed to address the
+        # same row GET .../content reads) rather than the lower-level
+        # .../blocks/:blockKey endpoint, whose blockKey-prefixing convention
+        # isn't reliably the same string as record.block_key.
+        #
+        # This write is itself a cms_blocks write, so the webhook fires again —
+        # but the value is local by then, so the Worker no-ops. Self-terminating.
+        env:
+          CMS_API_KEY: ${{ secrets.CMS_API_KEY }}
+          PAGE_SLUG: ${{ github.event.client_payload.page_slug }}
+          BLOCK_KEY: ${{ github.event.client_payload.block_key }}
+          LOCAL_PATH: ${{ steps.download.outputs.local_path }}
+        run: |
+          curl -sf -X PUT \
+            -H "x-api-key: $CMS_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://YOUR-CLIENT-DOMAIN.com/api/cms/pages/$PAGE_SLUG/content" \
+            -d "{\"fields\": {\"block.$BLOCK_KEY\": \"$LOCAL_PATH\"}}"

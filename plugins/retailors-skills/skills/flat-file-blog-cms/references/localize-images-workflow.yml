@@ -16,6 +16,22 @@ on:
     paths:
       - 'posts.json'
       - 'posts/**.md'
+  workflow_dispatch: {} # lets you run this by hand from the Actions tab to test it
+
+permissions:
+  contents: write
+
+# The publishing tool can push straight to main WHILE this job is running
+# (that's the whole reason this workflow exists), and a second
+# posts.json/posts/**.md push can trigger a second run before the first one
+# finishes. Serialize runs so only one localize commit is ever in flight —
+# without this, two concurrent jobs racing to push is far more likely to blow
+# through the retries below. Not cancel-in-progress: each run may be
+# localizing a different post's image, so a newer run doesn't make an older
+# one redundant.
+concurrency:
+  group: localize-blog-images
+  cancel-in-progress: false
 
 jobs:
   localize:
@@ -25,21 +41,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0 # full history so the rebase-and-retry below always has a common ancestor
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       # >>> CUSTOMIZE: path to localize-cover-images.js if it's been copied
-      # somewhere other than the repo root / a scripts/ folder.
+      # somewhere other than a scripts/ folder.
       - name: Download remote cover images and rewrite references
         run: node scripts/localize-cover-images.js
 
-      - name: Commit any localized images
+      - name: Commit and push localized images
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Media/ posts.json posts/*.md
-          git diff --cached --quiet || git commit -m "Localize blog cover images [skip localize]"
-          git push
+          if git diff --cached --quiet; then
+            echo "Nothing to localize."
+            exit 0
+          fi
+          git commit -m "Localize blog cover images [skip localize]"
+
+          # main moves fast (dashboard publishes + this workflow's own
+          # commits), so a plain `git push` can and does lose the race. Rebase
+          # onto the latest main and retry a few times with backoff before
+          # giving up. A bare `git push` here WILL eventually fail a real
+          # publish — don't simplify this away.
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt/5), rebasing onto latest origin/main..."
+            git fetch origin main
+            if ! git rebase origin/main; then
+              echo "Rebase hit a conflict — bailing out for manual review." >&2
+              git rebase --abort
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+
+          echo "Failed to push localized images after 5 attempts." >&2
+          exit 1

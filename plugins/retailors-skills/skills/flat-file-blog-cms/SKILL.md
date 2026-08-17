@@ -41,9 +41,16 @@ whoever adds a post should insert at the top). Each entry:
   "slug": "post-title-here",
   "date": "2026-06-24",
   "excerpt": "One or two sentence summary shown on the listing page.",
-  "cover_image": "Media/blog-post-title-here.jpg"
+  "cover_image": "Media/blog-post-title-here.jpg",
+  "category": "Optional Category"
 }
 ```
+
+`category` is optional and inconsistently present in real data — the
+reference site has it on newer posts and not on older ones. Any code that
+reads it must treat it as possibly-absent (no category filter UI that
+assumes every post has one, no `post.category.toLowerCase()` without a
+guard). Don't backfill it across old posts unless asked.
 
 `cover_image` can technically be any URL (absolute `https://...` or a
 site-relative `Media/...` path) — the rendering code just checks it for
@@ -165,6 +172,15 @@ time:
   Actions workflow that runs the same script on every push touching
   `posts.json`/`posts/**.md` and commits the localized result back — this
   is the practical option when the publisher is outside your control.
+
+**Two things in that workflow are load-bearing, not boilerplate.** The
+publishing tool can push to `main` *while the job is running* — that's the
+whole reason the workflow exists — so it needs (a) a `concurrency` group so
+two localize commits are never in flight at once, and (b) a
+rebase-and-retry loop around `git push` with `fetch-depth: 0` on checkout so
+the rebase always has a common ancestor. A plain `git push` here works in
+testing and then loses a race against a real publish. Both are in the
+reference file; don't simplify them out.
 
 ## Why the stub files exist
 

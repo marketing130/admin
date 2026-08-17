@@ -11,7 +11,7 @@
     {
       "name": "retailors-skills",
       "source": "./plugins/retailors-skills",
-      "description": "Marketing copywriting plus static-site blog and CMS patterns: copywriting, flat-file-blog-cms, remote-cms-api."
+      "description": "Marketing copywriting plus static-site blog and CMS patterns: copywriting, flat-file-blog-cms, remote-cms-api, and the /cms-onboard runbook for new client sites."
     }
   ]
 }

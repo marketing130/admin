@@ -39,8 +39,14 @@ Build:
    (not `preview` — preview is truncated).
    - If `type` is "body", use a multi-line textarea.
    - If `type` is "title" or "link", use a single-line text input.
-   - If `type` is "image", show a small image preview of the current
-     value plus a URL text input.
+   - If `type` is "alt_text", use a single-line text input. This is an
+     image's alt text — plain text only, NOT HTML. Add a helper note:
+     "Describes the image for screen readers and search engines."
+   - If `type` is "image", show a small image preview plus an input.
+     IMPORTANT: render the preview from the row's `preview` field (always
+     a ready-to-use absolute URL), never from `value` (which is usually a
+     site-relative path like "Media/foo.jpg" and will not render). Send
+     `value` back on save, not `preview`.
    - If `type` is "code", see the separate JSON-field prompt below.
    - Rows with category "Content" may contain simple inline HTML tags
      like <span>, <em>, <strong> in their value — leave any tags the
@@ -122,6 +128,74 @@ Save button, stacked — don't assume exactly one.
 
 Switching tabs should preserve each tab's own draft/dirty state
 independently.
+```
+
+## 4. Multi-client dashboard via the shared edge-function gateway
+
+Use this instead of prompt 1's direct-API approach when one dashboard edits
+several client sites. The browser never holds any client's API key — it
+sends the logged-in user's Supabase JWT, and the edge function looks up
+that client's key server-side.
+
+```
+The content editor must work across multiple client websites. Do NOT call
+the client sites directly and do NOT store any per-client API key in the
+frontend. Route every CMS call through our Supabase edge function
+"cms-api" instead, using the logged-in user's session JWT.
+
+Every call is a POST to the cms-api function with this envelope body:
+  {
+    "client_id": "<uuid of the selected client>",
+    "method": "GET" | "PUT" | "DELETE",
+    "path": "/pages" | "/pages/<slug>/content" | ...,
+    "body": { ... }        // omit entirely for GET
+  }
+The function proxies it to that client's own site at
+<website_url>/api/cms<path> and returns the site's JSON response verbatim.
+So every path and response shape from the other prompts applies unchanged —
+only the transport differs.
+
+Build:
+1. A client picker sourced from the existing clients table (only rows that
+   have both website_url and cms_api_key set — others aren't configured
+   for the CMS yet).
+2. Store the selected client_id in the editor's state and include it in
+   every envelope.
+3. Wrap all of this in ONE api(clientId, method, path, body) helper.
+
+Error handling — surface these distinctly rather than as a generic failure:
+- 409 with code "not_configured" -> "This client's CMS isn't set up yet."
+- 502 code "upstream_unreachable" / 504 code "upstream_timeout" ->
+  "Couldn't reach the client's website." Offer a retry button.
+- 403 -> the signed-in user's role isn't allowed to edit content.
+```
+
+## 5. Image fields: upload, swap, and the localization delay
+
+```
+Extend the edit dialog for fields with type "image" (this covers both the
+hero photo and each content image's "— Image File" row).
+
+1. Preview from the row's `preview` value, which is always an absolute URL.
+   Never build the preview from `value`.
+
+2. Allow replacing the image by uploading a file. Upload it to our storage
+   bucket, get back the public URL, and save THAT full https:// URL as the
+   field's value via the normal PUT /pages/:slug/content call.
+
+3. After a successful save of an image field, show an informational note:
+   "Image saved. It's being copied onto the website now — this usually
+   takes a minute or two, and the page may briefly show a missing image
+   until it finishes."
+   This is expected, not an error: the website automatically downloads the
+   uploaded image into its own repo and rewrites the saved value to a
+   local path, so the site never depends on our storage staying up. If you
+   re-fetch the field a few minutes later, `value` will have changed from
+   the https:// URL you saved to a local path like "Media/cms-about-img-1.jpg".
+   Treat that as normal, not as a failed save.
+
+4. Do not add client-side validation that rejects non-https values — a
+   site-relative path is the steady state for these fields.
 ```
 
 ## General notes when writing prompts for these tools

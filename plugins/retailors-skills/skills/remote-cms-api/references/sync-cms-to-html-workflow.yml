@@ -1,0 +1,104 @@
+# Bakes a page's saved CMS overrides into its .html file and commits them, so
+# a dashboard publish ends up in the repo instead of living only in the
+# database. Triggered by a database webhook hitting the Worker's
+# /api/cms/webhooks/content-sync route, which re-dispatches here — see the
+# "CMS -> HTML write-back" section of SKILL.md for the full pipeline and the
+# one-time setup.
+#
+# Drop this in as .github/workflows/sync-cms-to-html.yml, alongside
+# scripts/sync-cms-to-html.js.
+#
+# >>> CUSTOMIZE: nothing, if the script lives at scripts/sync-cms-to-html.js
+# and pages are <slug>.html at the repo root. Otherwise adjust the `node`
+# path and the `git add` target.
+name: Sync CMS content into HTML
+
+on:
+  repository_dispatch:
+    types: [sync-cms-content]
+  # Lets you re-run a page by hand from the Actions tab — handy if a deploy
+  # was slow enough that the finalize step gave up waiting, and the only way
+  # to sync overrides that were saved before this pipeline existed.
+  workflow_dispatch:
+    inputs:
+      page_slug:
+        description: 'Page slug to sync (e.g. index)'
+        required: true
+
+permissions:
+  contents: write
+
+# Per-page, and cancel-in-progress ON PURPOSE (unlike the localize
+# workflows): each run re-reads the full current state of the page, so a
+# newer run makes an older one redundant rather than complementary.
+concurrency:
+  group: sync-cms-to-html-${{ github.event.client_payload.page_slug || github.event.inputs.page_slug }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      PAGE_SLUG: ${{ github.event.client_payload.page_slug || github.event.inputs.page_slug }}
+      CMS_API_KEY: ${{ secrets.CMS_API_KEY }}
+      # A plain path, not ${{ runner.temp }} — the `runner` context isn't
+      # available in job-level env, only in steps. Outside the workspace so it
+      # can never be picked up by `git add`.
+      SNAPSHOT_FILE: /tmp/cms-sync-snapshot.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Write CMS overrides into the HTML file
+        id: apply
+        env:
+          MODE: apply
+        run: node scripts/sync-cms-to-html.js
+
+      - name: Commit and push
+        if: steps.apply.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$PAGE_SLUG.html"
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+            exit 0
+          fi
+          git commit -m "Sync CMS content into $PAGE_SLUG.html [skip localize]"
+
+          # Same rebase-and-retry as the localize workflows: main can move
+          # under us (another page's sync, an image localization commit).
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt/5), rebasing onto latest origin/main..."
+            git fetch origin main
+            if ! git rebase origin/main; then
+              echo "Rebase hit a conflict — bailing out for manual review." >&2
+              git rebase --abort
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+
+          echo "Failed to push after 5 attempts." >&2
+          exit 1
+
+      # Waits for the pushed commit to actually be deployed, THEN clears the
+      # rows it baked. Splitting this out from the apply step is what keeps the
+      # live page from flashing back to its pre-edit text: until the rows go
+      # away, the Worker is still serving the CMS value. Do not merge these
+      # two steps to "simplify" the workflow.
+      - name: Clear the overrides once the deploy is live
+        if: steps.apply.outputs.synced != '0'
+        env:
+          MODE: finalize
+        run: node scripts/sync-cms-to-html.js
+        timeout-minutes: 15

@@ -1,0 +1,48 @@
+# Copy to .dev.vars in the client repo for local `wrangler dev`, and set the
+# same names as real secrets in production with `wrangler secret put <NAME>`
+# (or via the Cloudflare dashboard: Workers & Pages -> this project ->
+# Settings -> Variables and Secrets).
+#
+# Commit this file as `.dev.vars.example`. Never commit `.dev.vars` itself —
+# add it to .gitignore.
+#
+#   wrangler secret put CMS_API_KEY
+#   wrangler secret put CMS_WEBHOOK_SECRET
+#   wrangler secret put GITHUB_DISPATCH_TOKEN
+
+# ---------------------------------------------------------------------------
+# Required for the CMS API itself
+# ---------------------------------------------------------------------------
+
+# Shared secret required on the x-api-key header for every /api/cms/* call.
+# Pick any long random string. This same value does double duty: it gates
+# incoming requests to the Worker AND is what the Worker sends on to the
+# shared cms-api edge function, which resolves it to exactly one client row.
+# So it must match `clients.cms_api_key` for this client in the CMS database.
+#
+# Until this is set, /api/cms/* is OPEN to anyone who finds the URLs. Check
+# GET /api/cms/ping at any time to see the current authMode. Setting it
+# re-locks the API immediately — no redeploy needed.
+CMS_API_KEY=
+
+# ---------------------------------------------------------------------------
+# Only needed for the two webhook pipelines (image auto-localization and
+# CMS -> HTML write-back). Skip both if you're not wiring those up.
+# ---------------------------------------------------------------------------
+
+# Shared secret required on the x-webhook-secret header for
+# POST /api/cms/webhooks/image-src and .../content-sync. Set the same value
+# as a custom header on each Supabase Database Webhook. Pick a long random
+# string DIFFERENT from CMS_API_KEY.
+CMS_WEBHOOK_SECRET=
+
+# GitHub token used to trigger this repo's Actions via repository_dispatch.
+# Needs write access to this repo: a classic PAT with the "repo" scope, or a
+# fine-grained PAT scoped to this repo with "Contents: Read and write".
+GITHUB_DISPATCH_TOKEN=
+
+# ---------------------------------------------------------------------------
+# NOTE: CMS_API_KEY also has to exist as a GitHub Actions repo secret
+# (Settings -> Secrets and variables -> Actions) — both workflows call back
+# into this API. That's the one secret that must be set in two places.
+# ---------------------------------------------------------------------------

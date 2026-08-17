@@ -1,7 +1,7 @@
 {
   "name": "retailors-skills",
-  "version": "1.0.0",
-  "description": "Retailors Group's shared Claude Code skills: marketing copywriting, a database-free flat-file blog pattern, and a remote CMS/SEO editing API for static sites.",
+  "version": "1.1.0",
+  "description": "Retailors Group's shared Claude Code skills: marketing copywriting, a database-free flat-file blog pattern, and a multi-tenant remote CMS/SEO editing API for static sites — plus a /cms-onboard command that stands the whole stack up on a new client site.",
   "author": {
     "name": "Retailors Group",
     "email": "marketing@retailorsgroup.com"
